@@ -27,5 +27,5 @@ Then open http://localhost:5000
 Edit `app.py` to change the Ollama host:
 
 ```python
-OLLAMA_BASE = "http://192.168.1.169:11434"
+OLLAMA_BASE = "http://127.0.0.1:11434"
 ```
