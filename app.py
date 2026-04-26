@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response, stream_with_context
+from flask import Flask, render_template, request, Response
 import requests
 import json
 import configparser
@@ -46,7 +46,6 @@ def _subscribe() -> threading.Event:
 
 def _unsubscribe(ev: threading.Event):
     with _state_lock:
-        _state_listeners.discard(ev) if hasattr(_state_listeners, 'discard') else None
         try:
             _state_listeners.remove(ev)
         except ValueError:
@@ -54,7 +53,6 @@ def _unsubscribe(ev: threading.Event):
 
 
 def _monitor_loop():
-    """Background thread: continuously probe Ollama and update _ollama_up."""
     global _ollama_up
     url = f"{OLLAMA_BASE}/api/tags"
     while True:
@@ -63,17 +61,14 @@ def _monitor_loop():
             up = r.ok
         except requests.exceptions.RequestException:
             up = False
-
         prev = _ollama_up
         _set_state(up)
         if up != prev:
             print(f"[ollama] {'✓ Connected' if up else '✗ Disconnected'} ({OLLAMA_HOST}:{OLLAMA_PORT})")
-
         time.sleep(RETRY_INTERVAL)
 
 
 def wait_for_ollama():
-    """Block startup until Ollama is ready (or retry_timeout exceeded)."""
     url = f"{OLLAMA_BASE}/api/tags"
     deadline = time.time() + RETRY_TIMEOUT
     attempt = 0
@@ -89,19 +84,14 @@ def wait_for_ollama():
             pass
         remaining = deadline - time.time()
         if remaining <= 0:
-            print(
-                f"[ollama] ✗ Host not reachable after {RETRY_TIMEOUT}s — starting anyway.",
-                file=sys.stderr,
-            )
+            print(f"[ollama] ✗ Host not reachable after {RETRY_TIMEOUT}s — starting anyway.", file=sys.stderr)
             return
-        print(
-            f"[ollama] Waiting for {OLLAMA_HOST}:{OLLAMA_PORT} "
-            f"(attempt {attempt}, {remaining:.0f}s left)…"
-        )
+        print(f"[ollama] Waiting for {OLLAMA_HOST}:{OLLAMA_PORT} (attempt {attempt}, {remaining:.0f}s left)…")
         time.sleep(min(RETRY_INTERVAL, remaining))
 
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB for base64 image payloads
 
 
 @app.route("/")
@@ -121,17 +111,16 @@ def list_models():
 
 @app.route("/api/status")
 def status_stream():
-    """SSE stream that emits the current connection state and every change."""
-    def generate():
-        # Send current state immediately
-        with _state_lock:
-            current = _ollama_up
-        yield f"data: {json.dumps({'up': current})}\n\n"
+    """SSE: push connection state changes to the browser."""
+    # Capture state before leaving request context
+    with _state_lock:
+        initial = _ollama_up
 
+    def generate(initial_state):
+        yield f"data: {json.dumps({'up': initial_state})}\n\n"
         ev = _subscribe()
         try:
             while True:
-                # Wait for a state change (with heartbeat every 15 s)
                 triggered = ev.wait(timeout=15)
                 if triggered:
                     ev.clear()
@@ -139,7 +128,6 @@ def status_stream():
                         current = _ollama_up
                     yield f"data: {json.dumps({'up': current})}\n\n"
                 else:
-                    # Heartbeat to keep the connection alive
                     yield ": heartbeat\n\n"
         except GeneratorExit:
             pass
@@ -147,33 +135,49 @@ def status_stream():
             _unsubscribe(ev)
 
     return Response(
-        stream_with_context(generate()),
+        generate(initial),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.route("/api/show", methods=["POST"])
+def show_model():
+    """Proxy /api/show to expose model capabilities (vision, families, etc.)."""
+    data = request.get_json(force=True, silent=False)
+    try:
+        r = requests.post(f"{OLLAMA_BASE}/api/show", json=data, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}, 502
 
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    data = request.json
+    data = request.get_json(force=True, silent=False)
     model = data.get("model", "llama3")
     messages = data.get("messages", [])
     stream = data.get("stream", True)
+    think = data.get("think", False)
 
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": stream,
-        "think": True,   # enable native thinking field for qwen3/deepseek-r1 etc.
-    }
+    for i, msg in enumerate(messages):
+        imgs = msg.get("images", [])
+        if imgs:
+            print(f"[chat] message[{i}] role={msg['role']} images={len(imgs)} first_len={len(imgs[0])}", file=sys.stderr)
 
-    def generate():
+    # Build payload entirely inside the request context
+    payload = {"model": model, "messages": messages, "stream": stream}
+    if think:
+        payload["think"] = True
+
+    # Capture ollama_base now — generator runs outside request context
+    ollama_base = OLLAMA_BASE
+
+    def generate(payload, base):
         try:
             with requests.post(
-                f"{OLLAMA_BASE}/api/chat",
+                f"{base}/api/chat",
                 json=payload,
                 stream=True,
                 timeout=120,
@@ -185,21 +189,19 @@ def chat():
         except Exception as e:
             yield json.dumps({"error": str(e)}) + "\n"
 
-    return Response(
-        stream_with_context(generate()),
-        mimetype="application/x-ndjson",
-    )
+    return Response(generate(payload, ollama_base), mimetype="application/x-ndjson")
 
 
 @app.route("/api/pull", methods=["POST"])
 def pull_model():
-    data = request.json
+    data = request.get_json(force=True, silent=False)
     name = data.get("name", "")
+    ollama_base = OLLAMA_BASE
 
-    def generate():
+    def generate(name, base):
         try:
             with requests.post(
-                f"{OLLAMA_BASE}/api/pull",
+                f"{base}/api/pull",
                 json={"name": name, "stream": True},
                 stream=True,
                 timeout=600,
@@ -211,11 +213,10 @@ def pull_model():
         except Exception as e:
             yield json.dumps({"error": str(e)}) + "\n"
 
-    return Response(stream_with_context(generate()), mimetype="application/x-ndjson")
+    return Response(generate(name, ollama_base), mimetype="application/x-ndjson")
 
 
 def find_free_port(start: int, max_tries: int = 100) -> int:
-    """Return the first free TCP port >= start."""
     import socket
     for port in range(start, start + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -228,7 +229,6 @@ def find_free_port(start: int, max_tries: int = 100) -> int:
 
 
 def update_config_port(new_port: int):
-    """Persist the chosen port back into config.ini."""
     cfg_path = os.path.join(os.path.dirname(__file__), "config.ini")
     cfg = configparser.ConfigParser()
     cfg.read(cfg_path)
@@ -239,10 +239,6 @@ def update_config_port(new_port: int):
 
 
 if __name__ == "__main__":
-    # When Flask debug/reloader is on, it spawns a child process with this env
-    # var set. Port selection must only happen in the parent (first) process so
-    # the reloader child inherits the already-chosen port instead of bumping it
-    # again each restart.
     in_reloader_child = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
 
     if not in_reloader_child:
@@ -252,7 +248,6 @@ if __name__ == "__main__":
             update_config_port(port)
         else:
             print(f"[flask] Port {port} is free.")
-        # Export so the reloader child picks up the same port
         os.environ["FLASK_RUN_PORT"] = str(port)
     else:
         port = int(os.environ.get("FLASK_RUN_PORT", FLASK_PORT))
