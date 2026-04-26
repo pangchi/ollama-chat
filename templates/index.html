@@ -396,6 +396,104 @@
   }
   .thinking span:nth-child(2) { animation-delay: .15s; }
   .thinking span:nth-child(3) { animation-delay: .3s; }
+  /* Image preview strip */
+  #image-preview-strip {
+    display: none;
+    gap: 8px;
+    flex-wrap: wrap;
+    max-width: 780px;
+    margin: 0 auto 8px;
+    padding: 0 2px;
+  }
+  #image-preview-strip.has-images { display: flex; }
+  .preview-thumb {
+    position: relative;
+    width: 64px; height: 64px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .preview-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .preview-thumb .remove-img {
+    position: absolute; top: 2px; right: 2px;
+    width: 16px; height: 16px;
+    background: rgba(0,0,0,.75);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .55rem; color: #fff; cursor: pointer;
+    line-height: 1;
+  }
+  .preview-thumb .remove-img:hover { background: var(--danger); }
+
+  /* Image attach button */
+  .btn-attach {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    border-radius: 6px;
+    flex-shrink: 0;
+    transition: color .2s, background .2s;
+  }
+  .btn-attach:hover { color: var(--accent); background: var(--surface); }
+  .btn-attach.has-images { color: var(--accent2); }
+
+  /* Image in chat bubble */
+  .msg-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .msg-images img {
+    max-width: 260px; max-height: 200px;
+    border-radius: 8px; object-fit: cover;
+    border: 1px solid var(--border);
+    cursor: zoom-in;
+  }
+
+  /* Thinking block */
+  .think-block {
+    border-left: 2px solid var(--accent);
+    margin-bottom: 12px;
+    border-radius: 0 6px 6px 0;
+    overflow: hidden;
+  }
+  .think-header {
+    background: var(--surface2);
+    padding: 6px 12px;
+    font-size: .72rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    letter-spacing: .06em;
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+  }
+  .think-header:hover { background: #1e1e26; }
+  .think-chevron { transition: transform .2s; font-size: .7rem; }
+  .think-block.collapsed .think-chevron { transform: rotate(-90deg); }
+  .think-body {
+    background: #0e0e14;
+    padding: 10px 14px;
+    font-size: .8rem;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .think-block.collapsed .think-body { display: none; }
+
+  /* Lightbox */
+  #lightbox {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.9); z-index: 200;
+    align-items: center; justify-content: center;
+    cursor: zoom-out;
+  }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 10px; }
+
   @keyframes bounce {
     0%, 60%, 100% { transform: translateY(0); }
     30% { transform: translateY(-6px); }
@@ -455,6 +553,34 @@
     transition: border-color .2s;
   }
   .input-wrap:focus-within { border-color: var(--accent); }
+  .input-wrap.drag-over {
+    border-color: var(--accent2);
+    background: #0e1e1a;
+    box-shadow: 0 0 0 3px rgba(79,195,161,.15);
+  }
+
+  /* Full-page drop overlay */
+  #drop-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    z-index: 150;
+    pointer-events: none;
+  }
+  #drop-overlay.active { display: block; pointer-events: all; }
+  #drop-overlay-inner {
+    position: absolute; inset: 16px;
+    border: 2px dashed var(--accent2);
+    border-radius: 16px;
+    background: rgba(79,195,161,.06);
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px;
+    color: var(--accent2);
+    font-size: 1.1rem; font-weight: 700;
+    letter-spacing: -.01em;
+    backdrop-filter: blur(2px);
+    pointer-events: none;
+  }
+  #drop-overlay-inner svg { opacity: .7; }
 
   #user-input {
     flex: 1;
@@ -675,8 +801,15 @@
     </div>
   </div>
 
+  <div id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" src="" alt=""/></div>
+
   <div id="input-area">
+    <div id="image-preview-strip"></div>
+    <input type="file" id="file-input" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)"/>
     <div class="input-wrap">
+      <button class="btn-attach" id="attach-btn" title="Attach image" onclick="document.getElementById('file-input').click()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 9.5l-4-4a3 3 0 00-4.24 4.24l5 5a5 5 0 007.07-7.07l-5-5a7 7 0 00-9.9 9.9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
       <textarea id="user-input" placeholder="Send a message…" rows="1"></textarea>
       <button id="send-btn" onclick="handleSendBtn()">
         <span id="send-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M14 2L7 9M14 2L9 14l-2-5-5-2 12-5z" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -690,6 +823,16 @@
     </div>
   </div>
 </main>
+
+<!-- Drop overlay -->
+<div id="drop-overlay">
+  <div id="drop-overlay-inner">
+    <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+      <path d="M20 8v16M12 16l8-8 8 8M8 28h24" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Drop images to attach
+  </div>
+</div>
 
 <!-- Pull modal -->
 <div id="pull-modal">
@@ -711,6 +854,121 @@ let conversations = JSON.parse(localStorage.getItem('ollama_chats') || '[]');
 let currentId = null;
 let isStreaming = false;
 let _abortController = null;
+let _pendingImages = []; // [{dataUrl, base64, mimeType}]
+
+// ── Image helpers ──
+function handleFileSelect(e) {
+  const files = Array.from(e.target.files);
+  e.target.value = '';
+  files.forEach(file => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      const base64 = dataUrl.split(',')[1];
+      _pendingImages.push({ dataUrl, base64, mimeType: file.type });
+      renderImageStrip();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderImageStrip() {
+  const strip = document.getElementById('image-preview-strip');
+  const btn = document.getElementById('attach-btn');
+  strip.innerHTML = '';
+  _pendingImages.forEach((img, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'preview-thumb';
+    thumb.innerHTML = `<img src="${img.dataUrl}" alt=""/><span class="remove-img" onclick="removeImage(${i})">✕</span>`;
+    strip.appendChild(thumb);
+  });
+  strip.classList.toggle('has-images', _pendingImages.length > 0);
+  btn.classList.toggle('has-images', _pendingImages.length > 0);
+}
+
+// ── Drag and drop ──
+function processDroppedFiles(files) {
+  const images = Array.from(files).filter(f => f.type.startsWith('image/'));
+  if (!images.length) return;
+  images.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      const base64 = dataUrl.split(',')[1];
+      _pendingImages.push({ dataUrl, base64, mimeType: file.type });
+      renderImageStrip();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+(function initDragDrop() {
+  const overlay = document.getElementById('drop-overlay');
+  const inputWrap = document.querySelector('.input-wrap');
+  let dragCounter = 0;
+
+  // Show overlay when dragging files over the window
+  document.addEventListener('dragenter', e => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounter++;
+    overlay.classList.add('active');
+  });
+
+  document.addEventListener('dragleave', e => {
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      overlay.classList.remove('active');
+    }
+  });
+
+  document.addEventListener('dragover', e => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    // Highlight input-wrap when hovering near it
+    const rect = inputWrap.getBoundingClientRect();
+    const near = e.clientX >= rect.left - 40 && e.clientX <= rect.right + 40 &&
+                 e.clientY >= rect.top  - 40 && e.clientY <= rect.bottom + 40;
+    inputWrap.classList.toggle('drag-over', near);
+  });
+
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.classList.remove('active');
+    inputWrap.classList.remove('drag-over');
+    processDroppedFiles(e.dataTransfer.files);
+    document.getElementById('user-input').focus();
+  });
+})();
+
+function removeImage(i) {
+  _pendingImages.splice(i, 1);
+  renderImageStrip();
+}
+
+// ── Lightbox ──
+function openLightbox(src) {
+  document.getElementById('lightbox-img').src = src;
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeLightbox();
+    if (isStreaming) abortStream();
+  }
+});
+
+// ── Think block toggle ──
+function toggleThink(el) {
+  el.closest('.think-block').classList.toggle('collapsed');
+}
 
 function handleSendBtn() {
   if (isStreaming) { abortStream(); } else { sendMessage(); }
@@ -860,21 +1118,26 @@ function renderConvList() {
 function renderMessages(messages) {
   const container = document.getElementById('messages');
   const empty = document.getElementById('empty-state');
+  // Always detach empty-state before clearing so it isn't destroyed
+  if (empty.parentNode) empty.parentNode.removeChild(empty);
+  container.innerHTML = '';
   if (!messages.length) {
-    container.innerHTML = '';
     container.appendChild(empty);
     empty.style.display = 'flex';
     return;
   }
   empty.style.display = 'none';
-  container.innerHTML = '';
-  messages.forEach(m => appendMessage(m.role, m.content, false));
+  messages.forEach(m => {
+    const text = typeof m.content === 'string' ? m.content : '';
+    const imgs = m._dataUrls || [];
+    appendMessage(m.role, text, false, imgs, m.thinking || '');
+  });
   container.scrollTop = container.scrollHeight;
 }
 
-function appendMessage(role, content, scroll = true) {
+function appendMessage(role, content, scroll = true, images = [], thinking = '') {
   const empty = document.getElementById('empty-state');
-  empty.style.display = 'none';
+  if (empty) { empty.style.display = 'none'; if (empty.parentNode) empty.parentNode.removeChild(empty); }
   const container = document.getElementById('messages');
   const wrap = document.createElement('div');
   wrap.className = 'message';
@@ -887,10 +1150,33 @@ function appendMessage(role, content, scroll = true) {
 
   const bubble = document.createElement('div');
   bubble.className = `bubble ${role === 'user' ? 'user-bubble' : ''}`;
+
   if (role === 'user') {
-    bubble.textContent = content;
+    // Show attached images above text
+    if (images.length) {
+      const imgRow = document.createElement('div');
+      imgRow.className = 'msg-images';
+      images.forEach(src => {
+        const im = document.createElement('img');
+        im.src = src;
+        im.onclick = () => openLightbox(src);
+        imgRow.appendChild(im);
+      });
+      bubble.appendChild(imgRow);
+    }
+    const textNode = document.createElement('span');
+    textNode.textContent = content;
+    bubble.appendChild(textNode);
   } else {
-    bubble.innerHTML = renderMarkdown(content);
+    if (thinking) {
+      const tb = document.createElement('div');
+      tb.className = 'think-block collapsed';
+      tb.innerHTML = `<div class="think-header" onclick="toggleThink(this)"><span>◈ Thinking</span><span class="think-chevron">▾</span></div><div class="think-body">${escHtml(thinking)}</div>`;
+      bubble.appendChild(tb);
+    }
+    const contentDiv = document.createElement('div');
+    contentDiv.innerHTML = renderAI(content);
+    bubble.appendChild(contentDiv);
     addCopyButtons(bubble);
     hljs.highlightAll();
   }
@@ -903,21 +1189,75 @@ function appendMessage(role, content, scroll = true) {
   return bubble;
 }
 
+function renderAI(text) {
+  // Extract <think>...</think> blocks (streaming-safe: partial tags ignored)
+  let html = '';
+  const thinkRe = /<think>([\s\S]*?)<\/think>/g;
+  let last = 0, m;
+  while ((m = thinkRe.exec(text)) !== null) {
+    if (m.index > last) html += marked.parse(text.slice(last, m.index));
+    html += `<div class="think-block">
+      <div class="think-header" onclick="toggleThink(this)">
+        <span>◈ Thinking</span><span class="think-chevron">▾</span>
+      </div>
+      <div class="think-body">${escHtml(m[1].trim())}</div>
+    </div>`;
+    last = m.index + m[0].length;
+  }
+  html += marked.parse(text.slice(last));
+  return html;
+}
+
 function renderMarkdown(text) {
   return marked.parse(text || '');
 }
 
+function copyToClipboard(text, btn) {
+  const succeed = () => {
+    btn.textContent = 'copied!';
+    setTimeout(() => btn.textContent = 'copy', 1500);
+  };
+  const fail = () => {
+    btn.textContent = 'failed';
+    setTimeout(() => btn.textContent = 'copy', 1500);
+  };
+
+  // Primary: Clipboard API (requires focus + secure context)
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(succeed).catch(() => {
+      // Fallback: execCommand (deprecated but works on HTTP + unfocused windows)
+      execCommandCopy(text) ? succeed() : fail();
+    });
+  } else {
+    execCommandCopy(text) ? succeed() : fail();
+  }
+}
+
+function execCommandCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
 function addCopyButtons(el) {
   el.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.copy-btn')) return; // avoid duplicates on re-render
     const btn = document.createElement('button');
     btn.className = 'copy-btn';
     btn.textContent = 'copy';
     btn.onclick = () => {
       const code = pre.querySelector('code')?.innerText || pre.innerText;
-      navigator.clipboard.writeText(code).then(() => {
-        btn.textContent = 'copied!';
-        setTimeout(() => btn.textContent = 'copy', 1500);
-      });
+      copyToClipboard(code, btn);
     };
     pre.style.position = 'relative';
     pre.appendChild(btn);
@@ -954,9 +1294,18 @@ async function sendMessage() {
     renderConvList();
   }
 
-  conv.messages.push({ role: 'user', content: text });
+  // Build user message — Ollama format: content=string, images=[base64, ...]
+  const imagesToSend = [..._pendingImages];
+  const userMsg = { role: 'user', content: text };
+  if (imagesToSend.length) {
+    userMsg.images = imagesToSend.map(img => img.base64);
+    userMsg._dataUrls = imagesToSend.map(img => img.dataUrl); // display only, not sent to Ollama
+  }
+  conv.messages.push(userMsg);
   saveConvs();
-  appendMessage('user', text);
+  appendMessage('user', text, true, imagesToSend.map(i => i.dataUrl));
+  _pendingImages = [];
+  renderImageStrip();
   input.value = '';
   input.style.height = 'auto';
 
@@ -990,7 +1339,11 @@ async function sendMessage() {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: conv.messages, stream: true }),
+      body: JSON.stringify({
+        model,
+        messages: conv.messages.map(({ _dataUrls, ...m }) => m), // strip display-only field
+        stream: true,
+      }),
       signal: _abortController.signal,
     });
 
@@ -999,6 +1352,9 @@ async function sendMessage() {
 
     thinkWrap.remove();
     aiBubble = appendMessage('assistant', '', true);
+
+    // Persistent DOM nodes for live think block
+    let thinkBlock = null, thinkBody = null, thinkText = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1009,13 +1365,39 @@ async function sendMessage() {
         try {
           const j = JSON.parse(line);
           if (j.error) { fullText += `\n\n⚠️ Error: ${j.error}`; break; }
+
+          // ── Native thinking field (Qwen3, DeepSeek-R1 via Ollama) ──
+          if (j.message?.thinking) {
+            thinkText += j.message.thinking;
+            if (!thinkBlock) {
+              // Create think block once and prepend to bubble
+              thinkBlock = document.createElement('div');
+              thinkBlock.className = 'think-block';
+              thinkBlock.innerHTML = `<div class="think-header" onclick="toggleThink(this)"><span>◈ Thinking</span><span class="think-chevron">▾</span></div><div class="think-body"></div>`;
+              thinkBody = thinkBlock.querySelector('.think-body');
+              aiBubble.prepend(thinkBlock);
+            }
+            thinkBody.textContent = thinkText;
+            container.scrollTop = container.scrollHeight;
+          }
+
+          // ── Regular content ──
           if (j.message?.content) {
             fullText += j.message.content;
             tokenCount += j.message.content.split(/\s+/).filter(Boolean).length;
             tokenCounter.textContent = `~${tokenCount} tokens`;
             progressWidth = Math.min(92, progressWidth + 0.8);
             progressBar.style.width = progressWidth + '%';
-            aiBubble.innerHTML = renderMarkdown(fullText);
+            // Render markdown after the think block if present
+            const mdHtml = renderAI(fullText);
+            if (thinkBlock) {
+              // Replace only the content after the think block
+              const existing = aiBubble.querySelector('.think-block');
+              aiBubble.innerHTML = mdHtml;
+              if (existing) aiBubble.prepend(existing);
+            } else {
+              aiBubble.innerHTML = mdHtml;
+            }
             addCopyButtons(aiBubble);
             container.scrollTop = container.scrollHeight;
           }
@@ -1024,7 +1406,7 @@ async function sendMessage() {
     }
 
     hljs.highlightAll();
-    conv.messages.push({ role: 'assistant', content: fullText });
+    conv.messages.push({ role: 'assistant', content: fullText, thinking: thinkText || undefined });
     saveConvs();
 
   } catch(e) {
@@ -1035,10 +1417,10 @@ async function sendMessage() {
       aborted = true;
       if (aiBubble && fullText) {
         fullText += '\n\n*⬛ Stopped*';
-        aiBubble.innerHTML = renderMarkdown(fullText);
+        aiBubble.innerHTML = renderAI(fullText);
         addCopyButtons(aiBubble);
         hljs.highlightAll();
-        conv.messages.push({ role: 'assistant', content: fullText });
+        conv.messages.push({ role: 'assistant', content: fullText, thinking: thinkText || undefined });
         saveConvs();
       } else if (aiBubble) {
         aiBubble.innerHTML = '<em style="color:var(--text-dim)">⬛ Stopped</em>';
