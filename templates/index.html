@@ -214,6 +214,43 @@
   }
   .btn-pull:hover { border-color: var(--accent2); color: var(--accent2); }
 
+  .think-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-size: .75rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color .2s, color .2s;
+    user-select: none;
+  }
+  .think-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .think-toggle.active { border-color: var(--accent); color: var(--accent); background: rgba(124,106,247,.1); }
+  .think-toggle .toggle-pill {
+    width: 28px; height: 15px;
+    border-radius: 10px;
+    background: var(--border);
+    position: relative;
+    transition: background .2s;
+    flex-shrink: 0;
+  }
+  .think-toggle.active .toggle-pill { background: var(--accent); }
+  .think-toggle .toggle-pill::after {
+    content: '';
+    position: absolute;
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: white;
+    top: 2px; left: 2px;
+    transition: transform .2s;
+  }
+  .think-toggle.active .toggle-pill::after { transform: translateX(13px); }
+  .think-toggle.hidden { display: none; }
+
   /* ── Main ── */
   #main {
     flex: 1;
@@ -560,6 +597,20 @@
   }
 
   /* Full-page drop overlay */
+  #vision-warn {
+    display: none;
+    max-width: 780px;
+    margin: 0 auto 6px;
+    padding: 7px 12px;
+    background: rgba(247,106,106,.1);
+    border: 1px solid rgba(247,106,106,.35);
+    border-radius: 8px;
+    font-size: .75rem;
+    color: #f76a6a;
+    align-items: center;
+    gap: 8px;
+  }
+
   #drop-overlay {
     display: none;
     position: fixed; inset: 0;
@@ -769,6 +820,10 @@
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
       New Chat
     </button>
+    <div class="think-toggle hidden" id="think-toggle" onclick="toggleThinkMode()" title="Enable thinking for supported models">
+      <span>◈ Thinking mode</span>
+      <span class="toggle-pill"></span>
+    </div>
     <button class="btn-pull" onclick="openPullModal()">
       <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3 6l3.5 3.5L10 6M1 11h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Pull Model
@@ -804,6 +859,10 @@
   <div id="lightbox" onclick="closeLightbox()"><img id="lightbox-img" src="" alt=""/></div>
 
   <div id="input-area">
+    <div id="vision-warn">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="flex-shrink:0"><path d="M7 1L1 13h12L7 1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7 6v3M7 10.5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <span id="vision-warn-text">This model may not support images. Try <strong>llava</strong>, <strong>llama3.2-vision</strong>, or <strong>gemma3</strong>.</span>
+    </div>
     <div id="image-preview-strip"></div>
     <input type="file" id="file-input" accept="image/*" multiple style="display:none" onchange="handleFileSelect(event)"/>
     <div class="input-wrap">
@@ -855,6 +914,68 @@ let currentId = null;
 let isStreaming = false;
 let _abortController = null;
 let _pendingImages = []; // [{dataUrl, base64, mimeType}]
+let _thinkEnabled = false;
+
+const THINKING_MODELS = ['qwen3', 'qwen2.5', 'deepseek-r1', 'deepseek-r2', 'qwq', 'marco-o1'];
+// Cache: modelName -> true/false/null (null = unknown, still fetching)
+const _visionCache = {};
+
+async function fetchModelCapabilities(name) {
+  if (_visionCache[name] !== undefined) return;
+  _visionCache[name] = null; // mark as in-flight
+  try {
+    const r = await fetch('/api/show', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const d = await r.json();
+    // Ollama /api/show returns model_info with a projector key for vision models
+    const info = d.model_info || {};
+    const hasProjector = Object.keys(info).some(k => k.includes('projector') || k.includes('vision') || k.includes('clip'));
+    const families = (d.details?.families || []).join(' ').toLowerCase();
+    const familyVision = families.includes('clip') || families.includes('vision');
+    _visionCache[name] = hasProjector || familyVision;
+  } catch {
+    _visionCache[name] = null; // unknown on error
+  }
+}
+
+function modelSupportsVision(name) {
+  const cached = _visionCache[name];
+  if (cached === true) return true;
+  if (cached === false) return false;
+  // Fallback heuristic while cache is loading or on error
+  const n = (name || '').toLowerCase();
+  const knownVision = ['llava', 'vision', 'moondream', 'gemma3', 'minicpm', 'cogvlm', 'bakllava', 'pixtral', 'qwen2-vl', 'qwen2.5vl', 'qwen3-vl', 'qwen3.5'];
+  return knownVision.some(m => n.includes(m));
+}
+
+function modelSupportsThinking(name) {
+  const n = (name || '').toLowerCase();
+  return THINKING_MODELS.some(m => n.includes(m));
+}
+
+function toggleThinkMode() {
+  _thinkEnabled = !_thinkEnabled;
+  const el = document.getElementById('think-toggle');
+  el.classList.toggle('active', _thinkEnabled);
+}
+
+function updateThinkToggleVisibility() {
+  const model = document.getElementById('model-select').value;
+  const el = document.getElementById('think-toggle');
+  const supports = modelSupportsThinking(model);
+  el.classList.toggle('hidden', !supports);
+  if (!supports) {
+    _thinkEnabled = false;
+    el.classList.remove('active');
+  } else {
+    // Auto-enable for thinking models
+    _thinkEnabled = true;
+    el.classList.add('active');
+  }
+}
 
 // ── Image helpers ──
 function handleFileSelect(e) {
@@ -885,6 +1006,14 @@ function renderImageStrip() {
   });
   strip.classList.toggle('has-images', _pendingImages.length > 0);
   btn.classList.toggle('has-images', _pendingImages.length > 0);
+
+  // Warn if current model can't handle images
+  const visionWarn = document.getElementById('vision-warn');
+  if (_pendingImages.length > 0 && !modelSupportsVision(document.getElementById('model-select').value)) {
+    visionWarn.style.display = 'flex';
+  } else {
+    visionWarn.style.display = 'none';
+  }
 }
 
 // ── Drag and drop ──
@@ -1012,6 +1141,13 @@ async function loadModels() {
     sel.innerHTML = models.map(m => `<option value="${m.name}">${m.name}</option>`).join('');
     dot.className = 'status-dot';
     txt.textContent = `${models.length} model${models.length>1?'s':''} available`;
+    // Pre-fetch capabilities for all models in background
+    models.forEach(m => fetchModelCapabilities(m.name).then(() => renderImageStrip()));
+    updateThinkToggleVisibility();
+    sel.addEventListener('change', () => {
+      updateThinkToggleVisibility();
+      renderImageStrip();
+    });
   } catch(e) {
     sel.innerHTML = '<option value="">Connection failed</option>';
     dot.className = 'status-dot error';
@@ -1084,7 +1220,16 @@ function loadConv(id) {
 }
 
 function saveConvs() {
-  localStorage.setItem('ollama_chats', JSON.stringify(conversations));
+  try {
+    // Strip base64 image data before persisting — images are session-only
+    const slim = conversations.map(c => ({
+      ...c,
+      messages: c.messages.map(({ images, ...m }) => m),
+    }));
+    localStorage.setItem('ollama_chats', JSON.stringify(slim));
+  } catch (e) {
+    console.warn('[saveConvs] localStorage write failed:', e);
+  }
 }
 
 function deleteConv(id, e) {
@@ -1302,10 +1447,16 @@ async function sendMessage() {
     userMsg._dataUrls = imagesToSend.map(img => img.dataUrl); // display only, not sent to Ollama
   }
   conv.messages.push(userMsg);
-  saveConvs();
+  // Verify images survived the push
+  const lastMsg = conv.messages[conv.messages.length - 1];
+  if (imagesToSend.length && !lastMsg.images?.length) {
+    console.error('[chat] BUG: images lost after push!');
+  }
+  saveConvs(); // saveConvs strips images from localStorage only, not from live conv.messages
   appendMessage('user', text, true, imagesToSend.map(i => i.dataUrl));
   _pendingImages = [];
   renderImageStrip();
+  document.getElementById('vision-warn').style.display = 'none';
   input.value = '';
   input.style.height = 'auto';
 
@@ -1339,11 +1490,22 @@ async function sendMessage() {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: conv.messages.map(({ _dataUrls, ...m }) => m), // strip display-only field
-        stream: true,
-      }),
+      body: (() => {
+        const msgs = conv.messages.map(({ _dataUrls, ...m }) => m);
+        const hasImgs = msgs.some(m => m.images?.length);
+        if (hasImgs) {
+          const imgMsg = msgs.find(m => m.images?.length);
+          console.log('[chat] images present:', imgMsg.images.length, 'first base64 length:', imgMsg.images[0]?.length);
+        } else {
+          console.warn('[chat] NO images in messages — conv.messages:', JSON.stringify(conv.messages.map(m => ({role:m.role, hasImages: !!m.images?.length, imgCount: m.images?.length || 0}))));
+        }
+        return JSON.stringify({
+          model,
+          messages: msgs,
+          stream: true,
+          ...(_thinkEnabled && modelSupportsThinking(model) ? { think: true } : {}),
+        });
+      })(),
       signal: _abortController.signal,
     });
 
@@ -1353,8 +1515,10 @@ async function sendMessage() {
     thinkWrap.remove();
     aiBubble = appendMessage('assistant', '', true);
 
-    // Persistent DOM nodes for live think block
+    // Create two stable child nodes — never replaced, only updated
     let thinkBlock = null, thinkBody = null, thinkText = '';
+    const contentDiv = document.createElement('div');
+    aiBubble.appendChild(contentDiv);
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1364,18 +1528,21 @@ async function sendMessage() {
       for (const line of lines) {
         try {
           const j = JSON.parse(line);
-          if (j.error) { fullText += `\n\n⚠️ Error: ${j.error}`; break; }
+          if (j.error) {
+            contentDiv.innerHTML = `<span style="color:var(--danger)">⚠️ ${j.error}</span>`;
+            fullText += `\n\n⚠️ Error: ${j.error}`;
+            break;
+          }
 
-          // ── Native thinking field (Qwen3, DeepSeek-R1 via Ollama) ──
+          // ── Native thinking (Qwen3, DeepSeek-R1) ──
           if (j.message?.thinking) {
             thinkText += j.message.thinking;
             if (!thinkBlock) {
-              // Create think block once and prepend to bubble
               thinkBlock = document.createElement('div');
               thinkBlock.className = 'think-block';
-              thinkBlock.innerHTML = `<div class="think-header" onclick="toggleThink(this)"><span>◈ Thinking</span><span class="think-chevron">▾</span></div><div class="think-body"></div>`;
+              thinkBlock.innerHTML = '<div class="think-header" onclick="toggleThink(this)"><span>◈ Thinking</span><span class="think-chevron">▾</span></div><div class="think-body"></div>';
               thinkBody = thinkBlock.querySelector('.think-body');
-              aiBubble.prepend(thinkBlock);
+              aiBubble.insertBefore(thinkBlock, contentDiv); // always before content
             }
             thinkBody.textContent = thinkText;
             container.scrollTop = container.scrollHeight;
@@ -1388,20 +1555,13 @@ async function sendMessage() {
             tokenCounter.textContent = `~${tokenCount} tokens`;
             progressWidth = Math.min(92, progressWidth + 0.8);
             progressBar.style.width = progressWidth + '%';
-            // Render markdown after the think block if present
-            const mdHtml = renderAI(fullText);
-            if (thinkBlock) {
-              // Replace only the content after the think block
-              const existing = aiBubble.querySelector('.think-block');
-              aiBubble.innerHTML = mdHtml;
-              if (existing) aiBubble.prepend(existing);
-            } else {
-              aiBubble.innerHTML = mdHtml;
-            }
-            addCopyButtons(aiBubble);
+            contentDiv.innerHTML = renderAI(fullText); // only update content node
+            addCopyButtons(contentDiv);
             container.scrollTop = container.scrollHeight;
           }
-        } catch {}
+        } catch(parseErr) {
+          console.warn('[stream] parse error:', parseErr, 'line:', line);
+        }
       }
     }
 
