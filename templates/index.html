@@ -1204,6 +1204,7 @@ function watchStatus() {
 
 // ── Conversations ──
 function newChat() {
+  abortStream();
   const id = Date.now().toString();
   conversations.unshift({ id, title: 'new chat', messages: [] });
   saveConvs();
@@ -1212,6 +1213,7 @@ function newChat() {
 }
 
 function loadConv(id) {
+  abortStream();
   currentId = id;
   const conv = conversations.find(c => c.id === id);
   document.getElementById('chat-title').textContent = conv?.title || 'new chat';
@@ -1263,9 +1265,10 @@ function renderConvList() {
 function renderMessages(messages) {
   const container = document.getElementById('messages');
   const empty = document.getElementById('empty-state');
-  // Always detach empty-state before clearing so it isn't destroyed
-  if (empty.parentNode) empty.parentNode.removeChild(empty);
-  container.innerHTML = '';
+  // Detach empty-state before wiping so it survives the innerHTML clear
+  if (empty && empty.parentNode) empty.parentNode.removeChild(empty);
+  // Force-clear everything including any partial streaming nodes
+  while (container.firstChild) container.removeChild(container.firstChild);
   if (!messages.length) {
     container.appendChild(empty);
     empty.style.display = 'flex';
