@@ -984,6 +984,7 @@ async function sendMessage() {
 
   let fullText = '';
   let aiBubble = null;
+  let aborted = false;
 
   try {
     const resp = await fetch('/api/chat', {
@@ -1012,7 +1013,6 @@ async function sendMessage() {
             fullText += j.message.content;
             tokenCount += j.message.content.split(/\s+/).filter(Boolean).length;
             tokenCounter.textContent = `~${tokenCount} tokens`;
-            // Grow progress bar to simulate activity (caps at 92%)
             progressWidth = Math.min(92, progressWidth + 0.8);
             progressBar.style.width = progressWidth + '%';
             aiBubble.innerHTML = renderMarkdown(fullText);
@@ -1026,14 +1026,18 @@ async function sendMessage() {
     hljs.highlightAll();
     conv.messages.push({ role: 'assistant', content: fullText });
     saveConvs();
+
   } catch(e) {
-    thinkWrap.remove();
+    // Safely remove thinking indicator if still present
+    if (thinkWrap.parentNode) thinkWrap.remove();
+
     if (e.name === 'AbortError') {
-      // Stopped by user — keep whatever was streamed, append a marker
+      aborted = true;
       if (aiBubble && fullText) {
         fullText += '\n\n*⬛ Stopped*';
         aiBubble.innerHTML = renderMarkdown(fullText);
         addCopyButtons(aiBubble);
+        hljs.highlightAll();
         conv.messages.push({ role: 'assistant', content: fullText });
         saveConvs();
       } else if (aiBubble) {
@@ -1043,19 +1047,25 @@ async function sendMessage() {
       if (!aiBubble) aiBubble = appendMessage('assistant', '', true);
       aiBubble.innerHTML = `<span style="color:var(--danger)">⚠️ ${e.message}</span>`;
     }
-  }
 
-  isStreaming = false;
-  _abortController = null;
-  sendBtn.classList.remove('streaming');
-  sendBtn.disabled = false;
-  progressBar.style.width = '100%';
-  setTimeout(() => {
-    progressBar.classList.remove('active');
-    progressBar.style.width = '0%';
-  }, 400);
-  tokenCounter.classList.remove('active');
-  document.getElementById('user-input').focus();
+  } finally {
+    // Always reset state — no matter how the stream ended
+    isStreaming = false;
+    _abortController = null;
+    sendBtn.classList.remove('streaming');
+    sendBtn.disabled = false;
+    progressBar.style.width = aborted ? '0%' : '100%';
+    if (!aborted) {
+      setTimeout(() => {
+        progressBar.classList.remove('active');
+        progressBar.style.width = '0%';
+      }, 400);
+    } else {
+      progressBar.classList.remove('active');
+    }
+    tokenCounter.classList.remove('active');
+    document.getElementById('user-input').focus();
+  }
 }
 
 function sendSuggestion(text) {
