@@ -167,6 +167,7 @@ def chat():
         "model": model,
         "messages": messages,
         "stream": stream,
+        "think": True,   # enable native thinking field for qwen3/deepseek-r1 etc.
     }
 
     def generate():
